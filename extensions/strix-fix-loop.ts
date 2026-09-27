@@ -35,6 +35,7 @@ import {
   resolveFromCwd,
   resolveExecutablePath,
   sanitizeName,
+  shouldCopyEntry,
   sarifFindings,
   shouldPruneEntry,
   tokenizeArgs,
@@ -685,7 +686,7 @@ async function scanRound(state: RunState, round: number): Promise<RoundScan> {
     const strixRunDir = runName === null ? null : join(roundDir, "strix_runs", runName);
     if (strixRunDir !== null && await isCompletedStrixRun(strixRunDir)) {
       await copyRunArtifacts(strixRunDir, roundDir);
-      const finalized = await finalizeRound(state, round, roundDir, targetDir, 0);
+      const finalized = await finalizeRound(state, round, roundDir, 0);
       scanStatus = finalized.status;
       return finalized;
     }
@@ -694,9 +695,27 @@ async function scanRound(state: RunState, round: number): Promise<RoundScan> {
       await fs.rm(workRoot, { recursive: true, force: true });
       await fs.mkdir(workRoot, { recursive: true, mode: 0o700 });
       progress(state, `round ${round}/${state.options.maxRounds}: copying and sanitizing the project`);
-      await fs.cp(state.project, targetDir, { recursive: true, dereference: false, verbatimSymlinks: true });
-      await fs.rm(join(targetDir, ".git"), { recursive: true, force: true });
+      const filteredPrune = { directories: 0, files: 0 };
+      await fs.cp(state.project, targetDir, {
+        recursive: true,
+        dereference: false,
+        verbatimSymlinks: true,
+        filter: async (source) => {
+          if (resolve(source) === state.project) return true;
+          const stat = await fs.lstat(source);
+          const keep = shouldCopyEntry(
+            basename(source), stat.isDirectory(), stat.isFile(), stat.isSymbolicLink(),
+          );
+          if (!keep) {
+            if (stat.isDirectory()) filteredPrune.directories++;
+            else filteredPrune.files++;
+          }
+          return keep;
+        },
+      });
       const pruned = await pruneTree(targetDir);
+      pruned.directories += filteredPrune.directories;
+      pruned.files += filteredPrune.files;
       await addSummary(state, `- round=${round} pruned_dirs=${pruned.directories} pruned_files=${pruned.files}`);
       await fs.writeFile(join(roundDir, "instruction.md"), state.instruction, { mode: 0o600 });
     } else {
@@ -704,15 +723,15 @@ async function scanRound(state: RunState, round: number): Promise<RoundScan> {
       if (!(await pathExists(join(strixRunDir!, ".state", "agents.json")))) {
         throw new Error(`Strix run ${runName} has no resumable .state/agents.json checkpoint`);
       }
-      // These are copies from the previous attempt and would shadow resumed run artifacts.
-      await Promise.all([
-        ...COPIED_ARTIFACTS.map((name) => fs.rm(join(roundDir, name), { force: true })),
-        fs.rm(join(roundDir, "vulnerabilities"), { recursive: true, force: true }),
-      ]);
       state.checkpoint.strixRunName = runName;
       await writeCheckpoint(state);
     }
 
+    // Clear copies from any previous attempt before fresh or resumed execution.
+    await Promise.all([
+      ...COPIED_ARTIFACTS.map((name) => fs.rm(join(roundDir, name), { force: true })),
+      fs.rm(join(roundDir, "vulnerabilities"), { recursive: true, force: true }),
+    ]);
     progress(state, `round ${round}/${state.options.maxRounds}: preparing Strix Docker network`);
     await createNetwork(state.dockerBin, network);
     networkCreated = true;
@@ -747,7 +766,7 @@ async function scanRound(state: RunState, round: number): Promise<RoundScan> {
       state.checkpoint.strixRunName = discoveredRunName;
       await writeCheckpoint(state);
     }
-    const finalized = await finalizeRound(state, round, roundDir, targetDir, timedOut ? 124 : code);
+    const finalized = await finalizeRound(state, round, roundDir, timedOut ? 124 : code);
     scanStatus = finalized.status;
     return finalized;
   } finally {
@@ -764,7 +783,7 @@ async function scanRound(state: RunState, round: number): Promise<RoundScan> {
 
 async function loadCompletedScan(state: RunState, round: number): Promise<RoundScan> {
   const roundDir = join(state.runDir, "strix", `round-${round}`);
-  const scan = await finalizeRound(state, round, roundDir, join(roundDir, "workspace", "target"), 0);
+  const scan = await finalizeRound(state, round, roundDir, 0);
   if (scan.status !== "success") throw new Error(scan.error ?? `completed scan artifacts are invalid: ${roundDir}`);
   return scan;
 }
@@ -794,11 +813,15 @@ async function finalizeRound(
   state: RunState,
   round: number,
   roundDir: string,
-  targetDir: string,
   exitCode: number,
 ): Promise<RoundScan> {
-  const sarifs = await findFilesNamed([roundDir, targetDir], "findings.sarif");
-  const reports = await findFilesNamed([roundDir, targetDir], "penetration_test_report.md");
+  // Ignore the copied target workspace; it may contain files with these names.
+  const sarifs = await findFilesNamed([join(roundDir, "strix_runs")], "findings.sarif");
+  const reports = await findFilesNamed([join(roundDir, "strix_runs")], "penetration_test_report.md");
+  if (await pathExists(join(roundDir, "findings.sarif"))) sarifs.push(join(roundDir, "findings.sarif"));
+  if (await pathExists(join(roundDir, "penetration_test_report.md"))) {
+    reports.push(join(roundDir, "penetration_test_report.md"));
+  }
   let sarifPath = await pathExists(join(roundDir, "findings.sarif"))
     ? join(roundDir, "findings.sarif")
     : sarifs.length === 1 ? sarifs[0] : "";
@@ -1044,19 +1067,22 @@ async function copyRunArtifacts(sourceDir: string, destinationDir: string): Prom
   if (sourceDir === destinationDir) return;
   for (const name of COPIED_ARTIFACTS) {
     const source = join(sourceDir, name);
+    const destination = join(destinationDir, name);
+    await fs.rm(destination, { recursive: true, force: true });
     try {
-      const stat = await fs.stat(source);
-      if (stat.isFile()) await fs.copyFile(source, join(destinationDir, name));
+      const stat = await fs.lstat(source);
+      if (stat.isFile()) await fs.copyFile(source, destination);
     } catch {
       // Artifact is optional.
     }
   }
   const sourceVulnerabilities = join(sourceDir, "vulnerabilities");
+  const destinationVulnerabilities = join(destinationDir, "vulnerabilities");
+  await fs.rm(destinationVulnerabilities, { recursive: true, force: true });
   try {
-    const stat = await fs.stat(sourceVulnerabilities);
+    const stat = await fs.lstat(sourceVulnerabilities);
     if (!stat.isDirectory()) return;
-    await fs.rm(join(destinationDir, "vulnerabilities"), { recursive: true, force: true });
-    await fs.cp(sourceVulnerabilities, join(destinationDir, "vulnerabilities"), { recursive: true });
+    await fs.cp(sourceVulnerabilities, destinationVulnerabilities, { recursive: true });
   } catch {
     // Artifact directory is optional.
   }

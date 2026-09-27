@@ -20,6 +20,7 @@ import {
   resolveExecutablePath,
   sanitizeName,
   sarifFindings,
+  shouldCopyEntry,
   shouldPruneEntry,
   stableStringify,
   tokenizeArgs,
@@ -106,6 +107,8 @@ check("parseDurationMs", () => {
 check("budgetPerAttempt splits the total", () => {
   const perRound = Number(budgetPerAttempt("50", 3));
   assert.ok(Math.abs(perRound - 50 / 3) < 1e-9);
+  assert.equal(budgetPerAttempt("1", 6), "0.166666666666");
+  assert.ok(Number(budgetPerAttempt("1", 6)) * 6 <= 1);
   assert.ok(Number(budgetPerAttempt("0.000000000001", 3)) > 0);
   assert.throws(() => budgetPerAttempt("0", 3));
 });
@@ -177,6 +180,8 @@ check("completedRunError recognizes run.json states", () => {
   assert.equal(completedRunError({ status: "completed" }), null);
   assert.equal(completedRunError({ completed: true, scan_results: { success: true } }), null);
   assert.notEqual(completedRunError({ status: "running" }), null);
+  assert.notEqual(completedRunError({ status: "completed", completed: false }), null);
+  assert.notEqual(completedRunError({ completed: true, finished: false }), null);
   assert.notEqual(completedRunError({ status: "completed", scan_results: { scan_completed: false } }), null);
   assert.notEqual(completedRunError({}), null);
   assert.notEqual(completedRunError(null), null);
@@ -191,6 +196,14 @@ check("prune classification", () => {
   assert.equal(shouldPruneEntry("link", false, true), true);
   assert.equal(shouldPruneEntry("main.go", false, false), false);
   assert.equal(shouldPruneEntry("src", true, false), false);
+});
+
+check("copy filter excludes pruned paths and special files", () => {
+  assert.equal(shouldCopyEntry(".git", true, false, false), false);
+  assert.equal(shouldCopyEntry("node_modules", true, false, false), false);
+  assert.equal(shouldCopyEntry("source.ts", false, true, false), true);
+  assert.equal(shouldCopyEntry("link.ts", false, false, true), false);
+  assert.equal(shouldCopyEntry("socket", false, false, false), false);
 });
 
 check("binary header detection", () => {

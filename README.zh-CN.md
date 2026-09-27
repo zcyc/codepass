@@ -49,7 +49,7 @@ pi -e /path/to/codepass
 | --- | --- |
 | 临时运行一次 | `pi -e /path/to/codepass` |
 | 作为 Pi 包安装 | `pi install /path/to/codepass` |
-| 复制为全局扩展 | `cp extensions/strix-fix-loop.ts ~/.pi/agent/extensions/` |
+| 复制为全局扩展 | `cp extensions/strix-fix-loop.ts extensions/strix-core.ts ~/.pi/agent/extensions/` |
 
 ## 使用
 

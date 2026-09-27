@@ -52,7 +52,7 @@ automatically and handed to the agent as soon as Strix finishes.
 | --- | --- |
 | Try it for one run | `pi -e /path/to/codepass` |
 | Install as a Pi package | `pi install /path/to/codepass` |
-| Global extension copy | `cp extensions/strix-fix-loop.ts ~/.pi/agent/extensions/` |
+| Global extension copy | `cp extensions/strix-fix-loop.ts extensions/strix-core.ts ~/.pi/agent/extensions/` |
 
 ## Usage
 

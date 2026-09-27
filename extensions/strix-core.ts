@@ -419,7 +419,9 @@ export function budgetPerAttempt(total: string, attempts: number): string {
   if (perAttempt <= 0 || !Number.isFinite(perAttempt)) {
     throw new Error("budget per attempt is outside the supported numeric range");
   }
-  const rounded = perAttempt.toFixed(12).replace(/0+$/, "").replace(/\.$/, "");
+  let roundedValue = perAttempt.toFixed(12);
+  if (Number(roundedValue) > perAttempt) roundedValue = (Number(roundedValue) - 1e-12).toFixed(12);
+  const rounded = roundedValue.replace(/0+$/, "").replace(/\.$/, "");
   return rounded === "0" ? String(perAttempt) : rounded;
 }
 
@@ -474,6 +476,15 @@ export function shouldPruneEntry(name: string, isDirectory: boolean, isSymbolicL
   if (name.startsWith(".")) return true;
   if (isDirectory) return PRUNED_DIRECTORIES.has(name) || name === "target";
   return PRUNED_SUFFIXES.has(extname(name).toLowerCase());
+}
+
+export function shouldCopyEntry(
+  name: string,
+  isDirectory: boolean,
+  isFile: boolean,
+  isSymbolicLink: boolean,
+): boolean {
+  return (isDirectory || isFile) && !shouldPruneEntry(name, isDirectory, isSymbolicLink);
 }
 
 export function isBinaryHeader(header: Uint8Array): boolean {
@@ -591,14 +602,10 @@ export function completedRunError(data: unknown): string | null {
     if (COMPLETED_MARKERS.includes(normalized)) marker = true;
     else if (FAILED_MARKERS.includes(normalized)) return `run ${key}=${value}`;
   }
-  if (!marker) {
-    for (const key of ["completed", "is_completed", "finished"]) {
-      const value = map[key];
-      if (typeof value !== "boolean") continue;
-      if (!value) return `run ${key}=false`;
-      marker = true;
-      break;
-    }
+  for (const key of ["completed", "is_completed", "finished"]) {
+    const value = map[key];
+    if (value === false) return `run ${key}=false`;
+    if (value === true) marker = true;
   }
   if (!marker) return "run.json has no recognized completion marker";
   const results = map.scan_results;
