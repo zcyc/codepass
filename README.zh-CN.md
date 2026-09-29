@@ -124,6 +124,7 @@ PI_FIX_DRY_RUN=true /strix-fix-loop                 # 当前项目只读分诊
 - 每轮创建独立的 Docker 网络（`strix-managed=true`），结束后删除；沙箱资源由 `STRIX_SANDBOX_*` 限制。
 - Strix 以无界面方式运行，并注入本地、防御性、只读的审计指令。
 - 只有同时满足以下条件才判定扫描成功：`run.json` 证明运行完成；同一运行目录下恰好有一个 `findings.sarif` 和一个 `penetration_test_report.md`；SARIF 可解析；日志中没有上下文窗口、运行时或内容过滤错误标记。
+- 成功复制并验证报告后会清理 Strix 内部运行目录；失败或中断时保留该目录以便续跑。
 
 **修复**
 

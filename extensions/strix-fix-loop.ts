@@ -564,6 +564,7 @@ async function reportOutcome(state: RunState, outcome: LoopOutcome): Promise<voi
     const fixDir = join(state.runDir, "pi", `round-${state.checkpoint.round}`);
     await cleanupIndex(join(fixDir, "git-index-before"));
     await cleanupIndex(join(fixDir, "git-index-after"));
+    await cleanupCompletedStrixRun(state, state.checkpoint.round);
   }
   await addSummary(state, `- result=${outcome.kind}`);
   const tail = state.summaryLines.slice(-10);
@@ -609,6 +610,7 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
       state.checkpoint.phase = "awaiting_confirmation";
       state.checkpoint.round = round;
       await writeCheckpoint(state);
+      await cleanupCompletedStrixRun(state, round);
       const confirmed = await state.ctx.ui.confirm(
         `Start round ${round} fix?`,
         `Strix found ${scan.findings} finding(s) in ${state.project}. ${state.options.dryRun || !state.options.allowBreaking
@@ -631,6 +633,7 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
       state.checkpoint.phase = "prepare_fix";
       state.checkpoint.round = round;
       await writeCheckpoint(state);
+      await cleanupCompletedStrixRun(state, round);
       progress(state, `round ${round}/${state.options.maxRounds}: Pi triage and fix`);
       fix = await fixRound(state, round, scan, resumingAgent);
     }
@@ -799,6 +802,51 @@ async function isCompletedStrixRun(runDir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function cleanupCompletedStrixRun(state: RunState, round: number): Promise<void> {
+  const runName = state.checkpoint.strixRunName;
+  if (runName === null) return;
+
+  const roundDir = join(state.runDir, "strix", `round-${round}`);
+  const strixRunsDir = join(roundDir, "strix_runs");
+  const strixRunDir = join(strixRunsDir, runName);
+  if (!(await isCompletedStrixRun(strixRunDir))) return;
+
+  const copiedArtifacts = await Promise.all(
+    ["findings.sarif", "penetration_test_report.md", "run.json"].map((name) =>
+      pathExists(join(roundDir, name)),
+    ),
+  );
+  if (!copiedArtifacts.every(Boolean)) return;
+
+  let entries: string[];
+  try {
+    entries = await fs.readdir(strixRunsDir);
+  } catch {
+    return;
+  }
+  if (entries.some((name) => name !== runName && name !== ".DS_Store")) {
+    await addSummary(state, `- round=${round} strix_run_cleanup=skipped (unexpected files in strix_runs)`);
+    return;
+  }
+
+  try {
+    // Keep Strix's resumable state until successful artifacts are copied and the Pi checkpoint has advanced.
+    await fs.rm(strixRunsDir, { recursive: true, force: true });
+  } catch (error) {
+    await addSummary(state, `- round=${round} strix_run_cleanup_warning=${messageOf(error)}`);
+    return;
+  }
+
+  state.checkpoint.strixRunName = null;
+  try {
+    await writeCheckpoint(state);
+  } catch (error) {
+    await addSummary(state, `- round=${round} strix_run_checkpoint_warning=${messageOf(error)}`);
+    return;
+  }
+  await addSummary(state, `- round=${round} strix_run_data=cleaned`);
 }
 
 async function finalizeRound(

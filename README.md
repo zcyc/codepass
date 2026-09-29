@@ -142,6 +142,9 @@ The `run-id` is the last component of the output directory and appears in the `/
   one `findings.sarif` and one `penetration_test_report.md` exist in the same
   run, the SARIF parses, and no context-window, runtime, or content-filter
   markers appear in the logs.
+- After copying and validating those artifacts, the internal Strix run
+  directory is removed on success and retained after failure or interruption
+  for resume.
 
 **Fix**
 
