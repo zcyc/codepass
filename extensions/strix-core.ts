@@ -5,6 +5,7 @@
  * exercise the logic under plain Node (`node scripts/self-check.ts`).
  */
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
 import { extname, resolve } from "node:path";
 
 export type ScanMode = "quick" | "standard" | "deep";
@@ -48,13 +49,14 @@ export interface ResumeOptions {
 
 export const USAGE = `Usage: /strix-fix-loop [project-dir] [quick|standard|deep] [flags]
 
-Runs a bounded loop in this Pi session: copy and sanitize the project, run a
-headless Strix scan, hand the findings to the current agent for triage and
-repair, then rescan. It stops on no findings, a repeated finding fingerprint,
+Runs bounded scan/fix rounds on the project open in this Pi session. Each
+round scans, asks for approval when needed, and lets the current agent repair
+findings. The next round verifies the previous fix; reaching the round limit
+does not add a verification scan. It stops on no findings, repeated findings,
 no repository change, a failed scan, or the round limit.
 
 Flags (Strix-compatible where possible):
-  -t, --target PATH         Project directory (default: current directory)
+  -t, --target PATH         Project directory (default: current Pi project)
   -m, --scan-mode MODE      quick | standard | deep (default: quick)
       --scope-mode MODE     auto | diff | full (default: full)
       --max-budget USD      Total Strix budget, split across rounds (default: 50)
@@ -484,9 +486,10 @@ export function budgetPerAttempt(total: string, attempts: number): string {
   return rounded === "0" ? String(perAttempt) : rounded;
 }
 
-/** Resolve a user path against Pi's project cwd, not the process cwd. */
-export function resolveFromCwd(cwd: string, path: string): string {
-  return resolve(cwd, path);
+/** Resolve a user path against Pi's project cwd, expanding a leading home marker. */
+export function resolveFromCwd(cwd: string, path: string, home = homedir()): string {
+  const expandedPath = path === "~" ? home : path.startsWith("~/") ? resolve(home, path.slice(2)) : path;
+  return resolve(cwd, expandedPath);
 }
 
 /** Keep bare commands on PATH; make relative executable paths absolute. */

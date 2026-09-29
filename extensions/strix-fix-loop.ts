@@ -248,7 +248,7 @@ async function findRunOutputRoots(
   args: ResumeOptions,
 ): Promise<string[]> {
   if (args.outputRoot !== undefined) {
-    return [await canonicalPath(resolveFromCwd(ctx.cwd, expandHome(args.outputRoot)))];
+    return [await canonicalPath(resolveFromCwd(ctx.cwd, args.outputRoot))];
   }
 
   const sessionManager = ctx.sessionManager as unknown as {
@@ -266,7 +266,7 @@ async function findRunOutputRoots(
     }
   }
   if (roots.size > 0) return [...roots];
-  return [await canonicalPath(resolveFromCwd(ctx.cwd, expandHome(process.env.STRIX_OUTPUT_DIR || "~/strix_runs")))];
+  return [await canonicalPath(resolveFromCwd(ctx.cwd, process.env.STRIX_OUTPUT_DIR || "~/strix_runs"))];
 }
 
 function parseCheckpoint(value: unknown): RunCheckpoint {
@@ -375,7 +375,7 @@ async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, o
   if (!ctx.hasUI && !options.yes) {
     throw new Error("fix confirmation requires a Pi UI; pass --yes to run without prompts");
   }
-  const project = await canonicalPath(options.project !== "" ? resolve(ctx.cwd, options.project) : ctx.cwd);
+  const project = await canonicalPath(resolveFromCwd(ctx.cwd, options.project));
   const projectStat = await fs.stat(project);
   if (!projectStat.isDirectory()) throw new Error(`project directory does not exist: ${project}`);
   if (project === "/" || project.includes("\n")) {
@@ -386,7 +386,7 @@ async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, o
     throw new Error("strix-fix-loop requires a Git worktree for change tracking");
   }
 
-  const outputRoot = await canonicalPath(resolveFromCwd(ctx.cwd, expandHome(options.outputRoot)));
+  const outputRoot = await canonicalPath(resolveFromCwd(ctx.cwd, options.outputRoot));
   requireOutside(project, outputRoot, "output directory");
   await fs.mkdir(outputRoot, { recursive: true, mode: 0o700 });
 
@@ -396,7 +396,7 @@ async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, o
 
   let userInstruction = options.instruction;
   if (options.instructionFile !== "") {
-    userInstruction = await readInstructionFile(resolve(ctx.cwd, options.instructionFile));
+    userInstruction = await readInstructionFile(resolveFromCwd(ctx.cwd, options.instructionFile));
   }
   const projectInstruction = await readProjectInstruction(project);
   const instruction = buildInstruction({
@@ -605,10 +605,6 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
         message: "the same findings returned after remediation; stopping before spending more budget",
       };
     }
-    if (!resumingFix && round === state.options.maxRounds) {
-      return { kind: "round_limit", message: `maximum rounds reached with ${scan.findings} finding(s) remaining` };
-    }
-
     if (shouldRequestFixConfirmation(state.checkpoint.phase, state.options.yes)) {
       state.checkpoint.phase = "awaiting_confirmation";
       state.checkpoint.round = round;
@@ -666,7 +662,10 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
     await cleanupIndex(join(fix.fixDir, "git-index-before"));
     await cleanupIndex(join(fix.fixDir, "git-index-after"));
   }
-  return { kind: "round_limit", message: "maximum rounds reached" };
+  return {
+    kind: "round_limit",
+    message: `completed ${state.options.maxRounds} scan/fix round(s); the final fix was not rescanned`,
+  };
 }
 
 async function scanRound(state: RunState, round: number): Promise<RoundScan> {

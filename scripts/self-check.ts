@@ -138,9 +138,12 @@ check("budgetPerAttempt splits the total", () => {
   assert.throws(() => budgetPerAttempt("0", 3));
 });
 
-check("relative output paths resolve from Pi cwd", () => {
+check("user paths resolve from Pi cwd and expand home", () => {
+  assert.equal(resolveFromCwd("/pi/project", ""), "/pi/project");
   assert.equal(resolveFromCwd("/pi/project", "artifacts"), "/pi/project/artifacts");
   assert.equal(resolveFromCwd("/pi/project", "/tmp/artifacts"), "/tmp/artifacts");
+  assert.equal(resolveFromCwd("/pi/project", "~/kk/event", "/Users/charles"), "/Users/charles/kk/event");
+  assert.equal(resolveFromCwd("/pi/project", "~", "/Users/charles"), "/Users/charles");
 });
 
 check("relative executable paths survive a child cwd change", () => {

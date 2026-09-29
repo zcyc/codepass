@@ -10,8 +10,8 @@ Pi 扩展 `/strix-fix-loop`：在当前 Pi 会话内执行本地授权的 Strix 
 
 1. 将项目复制到清理后的临时工作区；
 2. 在每轮独立的 Docker 网络中执行无界面 Strix 扫描；
-3. 先询问用户，再将该轮的 `findings.sarif` 和报告交给当前 Pi agent 分诊与修复；
-4. 再次扫描并循环，直到满足停止条件。
+3. 发现问题后先询问用户，再将该轮的 `findings.sarif` 和报告交给当前 Pi agent 分诊与修复；
+4. 下一轮重新扫描，直到满足停止条件。
 
 扩展不会自动提交、推送或部署代码。
 
@@ -31,10 +31,10 @@ pi -e /path/to/codepass
 ```
 
 ```text
-/strix-fix-loop ~/src/my-app
+/strix-fix-loop
 ```
 
-不需要传入扫描结果目录：每轮 Strix 结束后会自动定位结果；发现问题时会先询问，再开始修复。
+不需要传入项目路径或扫描结果目录：扩展会使用当前 Pi 打开的项目，并自动定位每轮 Strix 结果；发现问题时会先询问，再开始修复。
 
 ## 前置条件
 
@@ -59,13 +59,15 @@ pi -e /path/to/codepass
 ```
 
 ```text
-/strix-fix-loop                                      # 当前目录，quick，3 轮
-/strix-fix-loop ~/src/my-app standard
-/strix-fix-loop ~/src/my-app standard --yes       # 跳过每轮修复确认
-/strix-fix-loop ~/src/my-app deep --max-rounds 2 --max-budget 20
-/strix-fix-loop ~/src/my-app --instruction "重点检查认证"
-PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # 只读分诊
+/strix-fix-loop                                      # 当前 Pi 项目，quick，3 轮
+/strix-fix-loop --max-rounds 1                      # 当前项目执行一轮扫描与修复
+/strix-fix-loop --scan-mode standard --yes           # 跳过每轮修复确认
+/strix-fix-loop --scan-mode deep --max-rounds 2 --max-budget 20
+/strix-fix-loop --instruction "重点检查认证"
+PI_FIX_DRY_RUN=true /strix-fix-loop                 # 当前项目只读分诊
 ```
+
+`--max-rounds N` 限制完整的扫描/修复轮数。每轮先扫描，再按设置确认并修复；达到上限后不会额外扫描验证最后一次修复。
 
 如果 Pi 或 Strix 中途退出，在同一 Pi 会话中执行 `pi --continue`，再用运行目录名恢复：
 
@@ -77,7 +79,7 @@ PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # 只读分诊
 
 | 选项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `-t`, `--target PATH` | 当前目录 | 项目目录 |
+| `-t`, `--target PATH` | 当前 Pi 项目 | 项目目录；省略时使用当前 Pi 打开的项目 |
 | `-m`, `--scan-mode MODE` | `quick` | `quick`、`standard` 或 `deep` |
 | `--scope-mode MODE` | `full` | `auto`、`diff` 或 `full` |
 | `--max-budget USD` | `50` | Strix 总预算，按轮次拆分 |

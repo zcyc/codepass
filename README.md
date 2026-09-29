@@ -11,9 +11,9 @@ One command, no scan artifacts to pass around:
 
 1. Copies the project into a sanitized temporary workspace.
 2. Runs a headless Strix scan in a per-round Docker network.
-3. Asks before handing that round's `findings.sarif` and report to the current
-   Pi agent for triage and repair.
-4. Rescans and repeats until the loop stops.
+3. When findings exist, asks before handing that round's `findings.sarif` and
+   report to the current Pi agent for triage and repair.
+4. Rescans in the next round and repeats until the loop stops.
 
 The extension never commits, pushes, or deploys code.
 
@@ -33,10 +33,11 @@ pi -e /path/to/codepass
 ```
 
 ```text
-/strix-fix-loop ~/src/my-app
+/strix-fix-loop
 ```
 
-No scan result directory is required: each round's results are located
+No project path or scan result directory is required: the extension uses the
+project open in the current Pi session and locates each round's results
 automatically. When findings remain, Pi asks before starting the fix pass.
 
 ## Requirements
@@ -62,13 +63,17 @@ automatically. When findings remain, Pi asks before starting the fix pass.
 ```
 
 ```text
-/strix-fix-loop                                      # current dir, quick, 3 rounds
-/strix-fix-loop ~/src/my-app standard
-/strix-fix-loop ~/src/my-app standard --yes       # skip per-round fix prompts
-/strix-fix-loop ~/src/my-app deep --max-rounds 2 --max-budget 20
-/strix-fix-loop ~/src/my-app --instruction "Focus on authentication"
-PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # read-only triage
+/strix-fix-loop                                      # current Pi project, quick, 3 rounds
+/strix-fix-loop --max-rounds 1                      # one scan/fix round on the current project
+/strix-fix-loop --scan-mode standard --yes           # skip per-round fix prompts
+/strix-fix-loop --scan-mode deep --max-rounds 2 --max-budget 20
+/strix-fix-loop --instruction "Focus on authentication"
+PI_FIX_DRY_RUN=true /strix-fix-loop                 # read-only triage on current project
 ```
+
+`--max-rounds N` limits complete scan/fix rounds. Each round scans, then asks
+for approval before fixing when needed. Reaching the limit does not trigger an
+extra scan to verify the final fix.
 
 If Pi or Strix stops mid-run, continue the same Pi session with `pi --continue`, then resume by run directory name:
 
@@ -80,7 +85,7 @@ The `run-id` is the last component of the output directory and appears in the `/
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `-t`, `--target PATH` | current directory | Project directory |
+| `-t`, `--target PATH` | current Pi project | Project directory; defaults to the project open in Pi |
 | `-m`, `--scan-mode MODE` | `quick` | `quick`, `standard`, or `deep` |
 | `--scope-mode MODE` | `full` | `auto`, `diff`, or `full` |
 | `--max-budget USD` | `50` | Total Strix budget, split across rounds |
