@@ -45,7 +45,6 @@ check("tokenizeArgs honors quotes", () => {
 check("parseArgs defaults", () => {
   const options = parseArgs("", {});
   assert.deepEqual(options.errors, []);
-  assert.equal(options.project, "");
   assert.equal(options.scanMode, "quick");
   assert.equal(options.scopeMode, "full");
   assert.equal(options.maxRounds, 3);
@@ -57,11 +56,10 @@ check("parseArgs defaults", () => {
 
 check("parseArgs flags, positionals and quoting", () => {
   const options = parseArgs(
-    '"/tmp/my project" deep --max-rounds 5 --max-budget 10 --max-turns 7 --dry-run --yes --instruction "focus on auth"',
+    'deep --max-rounds 5 --max-budget 10 --max-turns 7 --dry-run --yes --instruction "focus on auth"',
     {},
   );
   assert.deepEqual(options.errors, []);
-  assert.equal(options.project, "/tmp/my project");
   assert.equal(options.scanMode, "deep");
   assert.equal(options.maxRounds, 5);
   assert.equal(options.maxBudget, "10");
@@ -82,7 +80,9 @@ check("fix approval only gates fresh and pending rounds", () => {
 
 check("parseArgs reports invalid input", () => {
   assert.ok(parseArgs("--bogus", {}).errors.some((item) => item.includes("unknown option")));
-  assert.ok(parseArgs("proj nope", {}).errors.some((item) => item.includes("unknown scan mode")));
+  assert.ok(parseArgs("~/kk/event", {}).errors.some((item) => item.includes("project paths are not accepted")));
+  assert.ok(parseArgs("--target /tmp/project", {}).errors.some((item) => item.includes("unknown option")));
+  assert.ok(parseArgs("standard --scan-mode deep", {}).errors.some((item) => item.includes("more than once")));
   assert.ok(
     parseArgs("--instruction a --instruction-file b", {}).errors.some((item) => item.includes("cannot be used together")),
   );

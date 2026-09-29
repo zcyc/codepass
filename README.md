@@ -11,7 +11,7 @@ One command, no scan artifacts to pass around:
 
 1. Copies the project into a sanitized temporary workspace.
 2. Runs a headless Strix scan in a per-round Docker network.
-3. When findings exist, asks before handing that round's `findings.sarif` and
+3. Runs Strix against the sanitized copy via Strix's `--target` option. When findings exist, asks before handing that round's `findings.sarif` and
    report to the current Pi agent for triage and repair.
 4. Rescans in the next round and repeats until the loop stops.
 
@@ -39,6 +39,8 @@ pi -e /path/to/codepass
 No project path or scan result directory is required: the extension uses the
 project open in the current Pi session and locates each round's results
 automatically. When findings remain, Pi asks before starting the fix pass.
+This command takes no project path; it passes Strix its sanitized workspace
+with Strix's own `--target` option.
 
 ## Requirements
 
@@ -59,7 +61,7 @@ automatically. When findings remain, Pi asks before starting the fix pass.
 ## Usage
 
 ```text
-/strix-fix-loop [project-dir] [quick|standard|deep] [flags]
+/strix-fix-loop [quick|standard|deep] [flags]
 ```
 
 ```text
@@ -85,7 +87,6 @@ The `run-id` is the last component of the output directory and appears in the `/
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `-t`, `--target PATH` | current Pi project | Project directory; defaults to the project open in Pi |
 | `-m`, `--scan-mode MODE` | `quick` | `quick`, `standard`, or `deep` |
 | `--scope-mode MODE` | `full` | `auto`, `diff`, or `full` |
 | `--max-budget USD` | `50` | Total Strix budget, split across rounds |

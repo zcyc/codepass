@@ -10,7 +10,7 @@ Pi 扩展 `/strix-fix-loop`：在当前 Pi 会话内执行本地授权的 Strix 
 
 1. 将项目复制到清理后的临时工作区；
 2. 在每轮独立的 Docker 网络中执行无界面 Strix 扫描；
-3. 发现问题后先询问用户，再将该轮的 `findings.sarif` 和报告交给当前 Pi agent 分诊与修复；
+3. Strix 通过自身的 `--target` 参数扫描清理后的副本；发现问题后先询问用户，再将该轮的 `findings.sarif` 和报告交给当前 Pi agent 分诊与修复；
 4. 下一轮重新扫描，直到满足停止条件。
 
 扩展不会自动提交、推送或部署代码。
@@ -34,7 +34,7 @@ pi -e /path/to/codepass
 /strix-fix-loop
 ```
 
-不需要传入项目路径或扫描结果目录：扩展会使用当前 Pi 打开的项目，并自动定位每轮 Strix 结果；发现问题时会先询问，再开始修复。
+不需要传入项目路径或扫描结果目录：扩展会使用当前 Pi 打开的项目，并自动定位每轮 Strix 结果；发现问题时会先询问，再开始修复。命令不接受项目路径；扩展会通过 Strix 自身的 `--target` 参数指定清理后的扫描副本。
 
 ## 前置条件
 
@@ -55,7 +55,7 @@ pi -e /path/to/codepass
 ## 使用
 
 ```text
-/strix-fix-loop [项目目录] [quick|standard|deep] [选项]
+/strix-fix-loop [quick|standard|deep] [选项]
 ```
 
 ```text
@@ -79,7 +79,6 @@ PI_FIX_DRY_RUN=true /strix-fix-loop                 # 当前项目只读分诊
 
 | 选项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `-t`, `--target PATH` | 当前 Pi 项目 | 项目目录；省略时使用当前 Pi 打开的项目 |
 | `-m`, `--scan-mode MODE` | `quick` | `quick`、`standard` 或 `deep` |
 | `--scope-mode MODE` | `full` | `auto`、`diff` 或 `full` |
 | `--max-budget USD` | `50` | Strix 总预算，按轮次拆分 |

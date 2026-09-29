@@ -82,7 +82,7 @@ const COPIED_ARTIFACTS = [
 const COMPLETION_SUGGESTIONS = [
   "quick", "standard", "deep",
   "--scan-mode", "--scope-mode", "--max-budget", "--max-turns", "--max-rounds",
-  "--dry-run", "--keep-workspace", "--output-dir", "--target", "--instruction",
+  "--dry-run", "--keep-workspace", "--output-dir", "--instruction",
   "--instruction-file", "--yes", "--help",
 ];
 
@@ -243,6 +243,15 @@ function currentSessionFile(ctx: ExtensionCommandContext): string | null {
   return sessionFile == null ? null : resolve(sessionFile);
 }
 
+async function ensureCurrentPiProject(project: string, cwd: string): Promise<void> {
+  const currentProject = await canonicalPath(cwd);
+  if (project !== currentProject) {
+    throw new Error(
+      `target project must match the project open in Pi (current: ${currentProject}); open Pi in ${project} and omit the target path`,
+    );
+  }
+}
+
 async function findRunOutputRoots(
   ctx: ExtensionCommandContext,
   args: ResumeOptions,
@@ -375,7 +384,7 @@ async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, o
   if (!ctx.hasUI && !options.yes) {
     throw new Error("fix confirmation requires a Pi UI; pass --yes to run without prompts");
   }
-  const project = await canonicalPath(resolveFromCwd(ctx.cwd, options.project));
+  const project = await canonicalPath(ctx.cwd);
   const projectStat = await fs.stat(project);
   if (!projectStat.isDirectory()) throw new Error(`project directory does not exist: ${project}`);
   if (project === "/" || project.includes("\n")) {
@@ -510,6 +519,7 @@ async function resumeStrixFixLoop(
 
   const project = await canonicalPath(checkpoint.project);
   if (project !== checkpoint.project) throw new Error("project path changed since this run started");
+  await ensureCurrentPiProject(project, ctx.cwd);
   const gitCheck = await execCapture("git", ["rev-parse", "--is-inside-work-tree"], { cwd: project });
   if (gitCheck.code !== 0 || gitCheck.stdout.trim() !== "true") {
     throw new Error(`project is no longer a Git worktree: ${project}`);

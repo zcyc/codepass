@@ -17,7 +17,6 @@ export function shouldRequestFixConfirmation(phase: RunPhase, yes: boolean): boo
 }
 
 export interface LoopOptions {
-  project: string;
   scanMode: ScanMode;
   scopeMode: ScopeMode;
   maxRounds: number;
@@ -47,16 +46,16 @@ export interface ResumeOptions {
   help: boolean;
 }
 
-export const USAGE = `Usage: /strix-fix-loop [project-dir] [quick|standard|deep] [flags]
+export const USAGE = `Usage: /strix-fix-loop [quick|standard|deep] [flags]
 
 Runs bounded scan/fix rounds on the project open in this Pi session. Each
 round scans, asks for approval when needed, and lets the current agent repair
 findings. The next round verifies the previous fix; reaching the round limit
 does not add a verification scan. It stops on no findings, repeated findings,
-no repository change, a failed scan, or the round limit.
+no repository change, a failed scan, or the round limit. The target is always
+the project open in Pi; open Pi in another project to scan it.
 
 Flags (Strix-compatible where possible):
-  -t, --target PATH         Project directory (default: current Pi project)
   -m, --scan-mode MODE      quick | standard | deep (default: quick)
       --scope-mode MODE     auto | diff | full (default: full)
       --max-budget USD      Total Strix budget, split across rounds (default: 50)
@@ -239,7 +238,6 @@ export function parseResumeArgs(raw: string): ResumeOptions {
 }
 
 interface ParsedFlags {
-  project?: string;
   scanMode?: string;
   scopeMode?: string;
   maxRounds?: string;
@@ -282,7 +280,6 @@ export function parseArgs(raw: string, env: Record<string, string | undefined>):
   };
 
   const options: LoopOptions = {
-    project: "",
     scanMode: enumValue("STRIX_SCAN_MODE", env.STRIX_SCAN_MODE || "quick", ["quick", "standard", "deep"] as const, "quick"),
     scopeMode: enumValue("STRIX_SCOPE_MODE", env.STRIX_SCOPE_MODE || "full", ["auto", "diff", "full"] as const, "full"),
     maxRounds: envInt("STRIX_FIX_LOOP_MAX_ROUNDS", 3),
@@ -326,7 +323,6 @@ export function parseArgs(raw: string, env: Record<string, string | undefined>):
   }
 
   const valueFlags: Record<string, keyof ParsedFlags> = {
-    "-t": "project", "--target": "project",
     "-m": "scanMode", "--scan-mode": "scanMode",
     "--scope-mode": "scopeMode",
     "--max-rounds": "maxRounds",
@@ -385,18 +381,17 @@ export function parseArgs(raw: string, env: Record<string, string | undefined>):
     positionals.push(token);
   }
 
-  if (positionals.length > 0 && flags.project === undefined) flags.project = positionals[0];
-  if (positionals.length > 1) {
-    const positionalMode = positionals[1];
+  if (positionals.length > 0) {
+    const positionalMode = positionals[0];
     if (positionalMode === "quick" || positionalMode === "standard" || positionalMode === "deep") {
       if (flags.scanMode === undefined) flags.scanMode = positionalMode;
+      else errors.push("scan mode was provided more than once");
     } else {
-      errors.push(`unknown scan mode: ${positionalMode}`);
+      errors.push(`unexpected positional argument: ${positionalMode}; project paths are not accepted—open Pi in the target project`);
     }
   }
-  if (positionals.length > 2) errors.push("too many positional arguments");
+  if (positionals.length > 1) errors.push("too many positional arguments");
 
-  if (flags.project !== undefined) options.project = flags.project;
   if (flags.scanMode !== undefined) {
     options.scanMode = enumValue("--scan-mode", flags.scanMode, ["quick", "standard", "deep"] as const, options.scanMode);
   }
