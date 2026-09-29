@@ -20,7 +20,6 @@ Pi 扩展 `/strix-fix-loop`：在当前 Pi 会话内执行本地授权的 Strix 
 | 扫描失败或不完整 | `scan_failed` |
 | 没有发现问题 | `pass` |
 | 等待用户批准开始修复 | `awaiting_confirmation` |
-| 修复后同一 finding 指纹再次出现 | `stalled` |
 | Pi 没有改动仓库 | `stalled` |
 | 达到轮数上限 | `round_limit` |
 

@@ -118,7 +118,6 @@ interface RunCheckpoint {
   project: string;
   phase: RunPhase;
   round: number;
-  previousDigest: string;
   strixRunName: string | null;
   options: PersistedOptions;
   roundBudget: string;
@@ -289,7 +288,6 @@ function parseCheckpoint(value: unknown): RunCheckpoint {
     typeof data.runId !== "string" || typeof data.runDir !== "string" ||
     typeof data.project !== "string" || typeof data.round !== "number" ||
     !Number.isInteger(data.round) || data.round < 1 ||
-    typeof data.previousDigest !== "string" ||
     !(data.strixRunName === null || typeof data.strixRunName === "string") ||
     data.options === null || typeof data.options !== "object" || Array.isArray(data.options) ||
     typeof data.roundBudget !== "string" || typeof data.instruction !== "string" ||
@@ -430,7 +428,6 @@ async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, o
     project,
     phase: "scan",
     round: 1,
-    previousDigest: "",
     strixRunName: null,
     options: persistedOptions(options),
     roundBudget,
@@ -579,7 +576,6 @@ async function reportOutcome(state: RunState, outcome: LoopOutcome): Promise<voi
 }
 
 async function executeRounds(state: RunState): Promise<LoopOutcome> {
-  let previousDigest = state.checkpoint.previousDigest;
   for (let round = state.checkpoint.round; round <= state.options.maxRounds; round++) {
     const resumingFix = ["awaiting_confirmation", "prepare_fix", "fix", "fix_done"].includes(state.checkpoint.phase);
     progress(state, `round ${round}/${state.options.maxRounds}: Strix ${state.options.scanMode} scan`);
@@ -609,16 +605,9 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
     if (!resumingFix && scan.findings === 0) {
       return { kind: "pass", message: `no findings remain after ${round} round(s)` };
     }
-    if (!resumingFix && previousDigest !== "" && scan.digest === previousDigest) {
-      return {
-        kind: "stalled",
-        message: "the same findings returned after remediation; stopping before spending more budget",
-      };
-    }
     if (shouldRequestFixConfirmation(state.checkpoint.phase, state.options.yes)) {
       state.checkpoint.phase = "awaiting_confirmation";
       state.checkpoint.round = round;
-      state.checkpoint.previousDigest = previousDigest;
       await writeCheckpoint(state);
       const confirmed = await state.ctx.ui.confirm(
         `Start round ${round} fix?`,
@@ -641,7 +630,6 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
       const resumingAgent = state.checkpoint.phase === "fix";
       state.checkpoint.phase = "prepare_fix";
       state.checkpoint.round = round;
-      state.checkpoint.previousDigest = previousDigest;
       await writeCheckpoint(state);
       progress(state, `round ${round}/${state.options.maxRounds}: Pi triage and fix`);
       fix = await fixRound(state, round, scan, resumingAgent);
@@ -662,10 +650,8 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
       ],
       tone: "success",
     });
-    previousDigest = scan.digest;
     state.checkpoint.phase = "scan";
     state.checkpoint.round = round + 1;
-    state.checkpoint.previousDigest = previousDigest;
     state.checkpoint.strixRunName = null;
     delete state.checkpoint.baselineTree;
     await writeCheckpoint(state);

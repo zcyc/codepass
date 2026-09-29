@@ -22,7 +22,6 @@ The extension never commits, pushes, or deploys code.
 | Scan failed or incomplete | `scan_failed` |
 | No findings remain | `pass` |
 | Waiting for approval to start a fix | `awaiting_confirmation` |
-| Same finding fingerprint after a fix | `stalled` |
 | Pi made no repository change | `stalled` |
 | Round limit reached | `round_limit` |
 
