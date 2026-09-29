@@ -10,7 +10,7 @@ Pi 扩展 `/strix-fix-loop`：在当前 Pi 会话内执行本地授权的 Strix 
 
 1. 将项目复制到清理后的临时工作区；
 2. 在每轮独立的 Docker 网络中执行无界面 Strix 扫描；
-3. 将该轮的 `findings.sarif` 和报告交给当前 Pi agent 分诊与修复；
+3. 先询问用户，再将该轮的 `findings.sarif` 和报告交给当前 Pi agent 分诊与修复；
 4. 再次扫描并循环，直到满足停止条件。
 
 扩展不会自动提交、推送或部署代码。
@@ -19,6 +19,7 @@ Pi 扩展 `/strix-fix-loop`：在当前 Pi 会话内执行本地授权的 Strix 
 | --- | --- |
 | 扫描失败或不完整 | `scan_failed` |
 | 没有发现问题 | `pass` |
+| 等待用户批准开始修复 | `awaiting_confirmation` |
 | 修复后同一 finding 指纹再次出现 | `stalled` |
 | Pi 没有改动仓库 | `stalled` |
 | 达到轮数上限 | `round_limit` |
@@ -33,7 +34,7 @@ pi -e /path/to/codepass
 /strix-fix-loop ~/src/my-app
 ```
 
-不需要传入扫描结果目录：每轮 Strix 结束后会自动定位本轮结果并交给 agent 修复。
+不需要传入扫描结果目录：每轮 Strix 结束后会自动定位结果；发现问题时会先询问，再开始修复。
 
 ## 前置条件
 
@@ -60,6 +61,7 @@ pi -e /path/to/codepass
 ```text
 /strix-fix-loop                                      # 当前目录，quick，3 轮
 /strix-fix-loop ~/src/my-app standard
+/strix-fix-loop ~/src/my-app standard --yes       # 跳过每轮修复确认
 /strix-fix-loop ~/src/my-app deep --max-rounds 2 --max-budget 20
 /strix-fix-loop ~/src/my-app --instruction "重点检查认证"
 PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # 只读分诊
@@ -85,6 +87,7 @@ PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # 只读分诊
 | `--max-rounds N` | `3` | 最大扫描/修复轮次 |
 | `--output-dir PATH` | `~/strix_runs` | 运行输出根目录，必须位于项目之外 |
 | `--dry-run` | `false` | 只读修复分析，不修改文件 |
+| `--yes` | `false` | 跳过每轮 Pi 修复前的确认 |
 | `--keep-workspace` | `false` | 保留清理后的扫描工作区 |
 | `-n`, `--non-interactive` | — | 兼容参数；扫描始终无界面运行 |
 | `-h`, `--help` | — | 在会话记录中显示帮助 |
@@ -124,6 +127,8 @@ PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # 只读分诊
 
 **修复**
 
+- 默认每轮修复前都会询问。拒绝后会保留已完成扫描的检查点；可用 `/strix-resume <run-id> --yes` 继续并跳过确认。
+- `--yes` 会跳过之后每轮的确认。无 UI 模式下必须传入 `--yes` 才会启动扫描，否则会在扫描前退出。
 - 修复提示词发送到当前 Pi 会话（`pi.sendUserMessage`），并等待该轮结束。
 - 通过临时 Git 索引记录变更，因此 `changes.diff` 也包含新增的未跟踪文件。
 - `--dry-run`（或 `PI_FIX_ALLOW_BREAKING=false`）时该轮只保留只读工具。
@@ -131,7 +136,7 @@ PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # 只读分诊
 **恢复**
 
 - `loop-state.json` 持久化当前阶段、轮次、Pi 会话文件和 Strix run 名称。
-- `/strix-resume <run-id>` 会续跑未完成的 Strix 扫描，或在恢复的 Pi 会话中继续未完成的修复，再进入下一轮。
+- `/strix-resume <run-id>` 会续跑未完成的 Strix 扫描，或在恢复的 Pi 会话中继续未完成的修复，再进入下一轮；追加 `--yes` 可跳过待确认及之后各轮的修复确认。
 - 同一个运行目录只能在原 Pi 会话中恢复；使用启动任务的会话执行 `pi --continue`。
 
 ## 输出

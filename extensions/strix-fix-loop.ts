@@ -31,16 +31,19 @@ import {
   isManagedInternalNetwork,
   messageOf,
   parseArgs,
+  parseResumeArgs,
   parseVersion,
   resolveFromCwd,
   resolveExecutablePath,
   sanitizeName,
   shouldCopyEntry,
+  shouldRequestFixConfirmation,
   sarifFindings,
   shouldPruneEntry,
-  tokenizeArgs,
   versionAtLeast,
   type LoopOptions,
+  type ResumeOptions,
+  type RunPhase,
 } from "./strix-core.ts";
 
 const STATUS_KEY = "strix-fix-loop";
@@ -48,7 +51,7 @@ const ENTRY_TYPE = "strix-fix-loop";
 const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const MIN_STRIX_VERSION: [number, number, number] = [1, 5, 2];
 const CHECKPOINT_FILE = "loop-state.json";
-const RESUME_USAGE = "Usage: /strix-resume <run-id> [--output-dir PATH]";
+const RESUME_USAGE = "Usage: /strix-resume <run-id> [--output-dir PATH] [--yes]";
 
 const CONTEXT_ERROR_NEEDLES = [
   "context window",
@@ -80,7 +83,7 @@ const COMPLETION_SUGGESTIONS = [
   "quick", "standard", "deep",
   "--scan-mode", "--scope-mode", "--max-budget", "--max-turns", "--max-rounds",
   "--dry-run", "--keep-workspace", "--output-dir", "--target", "--instruction",
-  "--instruction-file", "--help",
+  "--instruction-file", "--yes", "--help",
 ];
 
 interface LoopEntry {
@@ -106,7 +109,6 @@ interface RunState {
   checkpointFile: string;
 }
 
-type RunPhase = "scan" | "prepare_fix" | "fix" | "fix_done" | "complete";
 type PersistedOptions = Omit<LoopOptions, "errors" | "help">;
 
 interface RunCheckpoint {
@@ -148,7 +150,7 @@ interface RoundFix {
 }
 
 interface LoopOutcome {
-  kind: "pass" | "stalled" | "round_limit" | "scan_failed" | "fix_unavailable";
+  kind: "pass" | "stalled" | "round_limit" | "scan_failed" | "fix_unavailable" | "awaiting_confirmation";
   message: string;
 }
 
@@ -207,7 +209,7 @@ export default function strixFixLoop(pi: ExtensionAPI): void {
   pi.registerCommand("strix-resume", {
     description: "Resume an interrupted Strix scan and fix loop",
     handler: async (rawArgs, ctx) => {
-      let args: ResumeArgs;
+      let args: ResumeOptions;
       try {
         args = parseResumeArgs(rawArgs);
       } catch (error) {
@@ -229,45 +231,6 @@ export default function strixFixLoop(pi: ExtensionAPI): void {
   });
 }
 
-interface ResumeArgs {
-  runId: string;
-  outputRoot?: string;
-  help: boolean;
-}
-
-function parseResumeArgs(raw: string): ResumeArgs {
-  const tokens = tokenizeArgs(raw);
-  let runId = "";
-  let outputRoot: string | undefined;
-  let help = false;
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index];
-    if (token === "-h" || token === "--help") {
-      help = true;
-      continue;
-    }
-    if (token === "--output-dir") {
-      outputRoot = tokens[++index];
-      if (outputRoot === undefined || outputRoot.startsWith("-")) {
-        throw new Error("--output-dir requires a path");
-      }
-      continue;
-    }
-    if (token.startsWith("--output-dir=")) {
-      outputRoot = token.slice("--output-dir=".length);
-      if (outputRoot === "") throw new Error("--output-dir requires a path");
-      continue;
-    }
-    if (token.startsWith("-") || runId !== "") throw new Error(`unexpected argument: ${token}`);
-    runId = token;
-  }
-  if (!help && runId === "") throw new Error("run-id is required");
-  if (runId !== "" && !/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(runId)) {
-    throw new Error("run-id must be a simple run directory name");
-  }
-  return { runId, outputRoot, help };
-}
-
 function persistedOptions(options: LoopOptions): PersistedOptions {
   const persisted = { ...options } as Partial<LoopOptions>;
   delete persisted.errors;
@@ -282,7 +245,7 @@ function currentSessionFile(ctx: ExtensionCommandContext): string | null {
 
 async function findRunOutputRoots(
   ctx: ExtensionCommandContext,
-  args: ResumeArgs,
+  args: ResumeOptions,
 ): Promise<string[]> {
   if (args.outputRoot !== undefined) {
     return [await canonicalPath(resolveFromCwd(ctx.cwd, expandHome(args.outputRoot)))];
@@ -309,7 +272,7 @@ async function findRunOutputRoots(
 function parseCheckpoint(value: unknown): RunCheckpoint {
   if (value === null || typeof value !== "object") throw new Error("checkpoint is not a JSON object");
   const data = value as Record<string, unknown>;
-  const phases: RunPhase[] = ["scan", "prepare_fix", "fix", "fix_done", "complete"];
+  const phases: RunPhase[] = ["scan", "awaiting_confirmation", "prepare_fix", "fix", "fix_done", "complete"];
   if (data.version !== 1 || !phases.includes(data.phase as RunPhase)) {
     throw new Error("unsupported or invalid checkpoint version/phase");
   }
@@ -409,6 +372,9 @@ function appendLoopEntry(pi: ExtensionAPI, entry: LoopEntry): void {
 }
 
 async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, options: LoopOptions): Promise<void> {
+  if (!ctx.hasUI && !options.yes) {
+    throw new Error("fix confirmation requires a Pi UI; pass --yes to run without prompts");
+  }
   const project = await canonicalPath(options.project !== "" ? resolve(ctx.cwd, options.project) : ctx.cwd);
   const projectStat = await fs.stat(project);
   if (!projectStat.isDirectory()) throw new Error(`project directory does not exist: ${project}`);
@@ -494,7 +460,7 @@ async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, o
   });
 
   const outcome = await executeRounds(state);
-  if (outcome.kind !== "scan_failed") {
+  if (outcome.kind !== "scan_failed" && outcome.kind !== "awaiting_confirmation") {
     state.checkpoint.phase = "complete";
     await writeCheckpoint(state);
   }
@@ -504,7 +470,7 @@ async function runStrixFixLoop(pi: ExtensionAPI, ctx: ExtensionCommandContext, o
 async function resumeStrixFixLoop(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
-  args: ResumeArgs,
+  args: ResumeOptions,
 ): Promise<void> {
   const sessionFile = currentSessionFile(ctx);
   if (sessionFile === null) throw new Error("cannot resume from an ephemeral Pi session; use a persistent session");
@@ -532,6 +498,15 @@ async function resumeStrixFixLoop(
     throw new Error("this run belongs to a different Pi session; resume the original session with pi --continue");
   }
   if (checkpoint.phase === "complete") throw new Error(`run ${args.runId} is already complete`);
+  const options: LoopOptions = {
+    ...checkpoint.options,
+    yes: args.yes || checkpoint.options.yes === true,
+    help: false,
+    errors: [],
+  };
+  if (!ctx.hasUI && shouldRequestFixConfirmation(checkpoint.phase, options.yes)) {
+    throw new Error("fix confirmation requires a Pi UI; pass --yes to resume without prompts");
+  }
 
   const project = await canonicalPath(checkpoint.project);
   if (project !== checkpoint.project) throw new Error("project path changed since this run started");
@@ -542,7 +517,6 @@ async function resumeStrixFixLoop(
   requireOutside(project, runDir, "run directory");
   await inspectDocker();
   const strixBin = await resolveStrixBinary(checkpoint.strixBinary);
-  const options: LoopOptions = { ...checkpoint.options, help: false, errors: [] };
   const summaryFile = join(runDir, "summary.md");
   const state: RunState = {
     pi,
@@ -560,6 +534,10 @@ async function resumeStrixFixLoop(
     checkpoint,
     checkpointFile,
   };
+  if (args.yes) {
+    state.checkpoint.options.yes = true;
+    await writeCheckpoint(state);
+  }
 
   appendLoopEntry(pi, {
     title: `strix-fix-loop ${args.runId}: resuming`,
@@ -567,7 +545,7 @@ async function resumeStrixFixLoop(
   });
   progress(state, `resuming ${checkpoint.phase} at round ${checkpoint.round}`);
   const outcome = await executeRounds(state);
-  if (outcome.kind !== "scan_failed") {
+  if (outcome.kind !== "scan_failed" && outcome.kind !== "awaiting_confirmation") {
     state.checkpoint.phase = "complete";
     await writeCheckpoint(state);
   }
@@ -593,7 +571,7 @@ async function reportOutcome(state: RunState, outcome: LoopOutcome): Promise<voi
 async function executeRounds(state: RunState): Promise<LoopOutcome> {
   let previousDigest = state.checkpoint.previousDigest;
   for (let round = state.checkpoint.round; round <= state.options.maxRounds; round++) {
-    const resumingFix = ["prepare_fix", "fix", "fix_done"].includes(state.checkpoint.phase);
+    const resumingFix = ["awaiting_confirmation", "prepare_fix", "fix", "fix_done"].includes(state.checkpoint.phase);
     progress(state, `round ${round}/${state.options.maxRounds}: Strix ${state.options.scanMode} scan`);
     let scan: RoundScan;
     try {
@@ -629,6 +607,25 @@ async function executeRounds(state: RunState): Promise<LoopOutcome> {
     }
     if (!resumingFix && round === state.options.maxRounds) {
       return { kind: "round_limit", message: `maximum rounds reached with ${scan.findings} finding(s) remaining` };
+    }
+
+    if (shouldRequestFixConfirmation(state.checkpoint.phase, state.options.yes)) {
+      state.checkpoint.phase = "awaiting_confirmation";
+      state.checkpoint.round = round;
+      state.checkpoint.previousDigest = previousDigest;
+      await writeCheckpoint(state);
+      const confirmed = await state.ctx.ui.confirm(
+        `Start round ${round} fix?`,
+        `Strix found ${scan.findings} finding(s) in ${state.project}. ${state.options.dryRun || !state.options.allowBreaking
+          ? "Pi will review them in read-only mode."
+          : "Pi may edit project files to address them."}`,
+      );
+      if (!confirmed) {
+        const message = state.checkpoint.piSessionFile === null
+          ? `round ${round} fix was not started; no persistent Pi session is available to resume; review ${scan.scanDir} or start a new run with --yes`
+          : `round ${round} fix was not started; resume with /strix-resume ${state.runId} to confirm again, or add --yes to skip confirmation`;
+        return { kind: "awaiting_confirmation", message };
+      }
     }
 
     let fix: RoundFix;

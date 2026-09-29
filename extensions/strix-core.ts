@@ -9,6 +9,11 @@ import { extname, resolve } from "node:path";
 
 export type ScanMode = "quick" | "standard" | "deep";
 export type ScopeMode = "auto" | "diff" | "full";
+export type RunPhase = "scan" | "awaiting_confirmation" | "prepare_fix" | "fix" | "fix_done" | "complete";
+
+export function shouldRequestFixConfirmation(phase: RunPhase, yes: boolean): boolean {
+  return !yes && (phase === "scan" || phase === "awaiting_confirmation");
+}
 
 export interface LoopOptions {
   project: string;
@@ -20,6 +25,7 @@ export interface LoopOptions {
   instruction: string;
   instructionFile: string;
   dryRun: boolean;
+  yes: boolean;
   keepWorkspace: boolean;
   frontendStatic: boolean;
   coordinationOptimized: boolean;
@@ -31,6 +37,13 @@ export interface LoopOptions {
   strixBin: string;
   help: boolean;
   errors: string[];
+}
+
+export interface ResumeOptions {
+  runId: string;
+  outputRoot?: string;
+  yes: boolean;
+  help: boolean;
 }
 
 export const USAGE = `Usage: /strix-fix-loop [project-dir] [quick|standard|deep] [flags]
@@ -51,6 +64,7 @@ Flags (Strix-compatible where possible):
       --max-rounds N        Scan/fix rounds (default: 3)
       --output-dir PATH     Run output root (default: ~/strix_runs)
       --dry-run             Read-only fix pass, no file edits
+      --yes                 Skip confirmation before each Pi fix pass
       --keep-workspace      Keep the sanitized scan workspace
   -n, --non-interactive     Accepted for compatibility (scans are headless)
   -h, --help                Show this help
@@ -184,6 +198,44 @@ export function tokenizeArgs(raw: string): string[] {
   return tokens;
 }
 
+export function parseResumeArgs(raw: string): ResumeOptions {
+  const tokens = tokenizeArgs(raw);
+  let runId = "";
+  let outputRoot: string | undefined;
+  let yes = false;
+  let help = false;
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token === "-h" || token === "--help") {
+      help = true;
+      continue;
+    }
+    if (token === "--yes") {
+      yes = true;
+      continue;
+    }
+    if (token === "--output-dir") {
+      outputRoot = tokens[++index];
+      if (outputRoot === undefined || outputRoot.startsWith("-")) {
+        throw new Error("--output-dir requires a path");
+      }
+      continue;
+    }
+    if (token.startsWith("--output-dir=")) {
+      outputRoot = token.slice("--output-dir=".length);
+      if (outputRoot === "") throw new Error("--output-dir requires a path");
+      continue;
+    }
+    if (token.startsWith("-") || runId !== "") throw new Error(`unexpected argument: ${token}`);
+    runId = token;
+  }
+  if (!help && runId === "") throw new Error("run-id is required");
+  if (runId !== "" && !/^[a-z0-9][a-z0-9._-]{0,127}$/i.test(runId)) {
+    throw new Error("run-id must be a simple run directory name");
+  }
+  return { runId, outputRoot, yes, help };
+}
+
 interface ParsedFlags {
   project?: string;
   scanMode?: string;
@@ -195,6 +247,7 @@ interface ParsedFlags {
   instructionFile?: string;
   outputRoot?: string;
   dryRun?: boolean;
+  yes?: boolean;
   keepWorkspace?: boolean;
   help?: boolean;
 }
@@ -236,6 +289,7 @@ export function parseArgs(raw: string, env: Record<string, string | undefined>):
     instruction: "",
     instructionFile: "",
     dryRun: envBool("PI_FIX_DRY_RUN", false),
+    yes: false,
     keepWorkspace: envBool("STRIX_KEEP_WORKSPACE", false),
     frontendStatic: envBool("STRIX_FRONTEND_STATIC", false),
     coordinationOptimized: envBool("STRIX_COORDINATION_OPTIMIZED", false),
@@ -299,6 +353,10 @@ export function parseArgs(raw: string, env: Record<string, string | undefined>):
       flags.keepWorkspace = true;
       continue;
     }
+    if (token === "--yes") {
+      flags.yes = true;
+      continue;
+    }
     if (token === "-n" || token === "--non-interactive") {
       continue; // scans are always headless
     }
@@ -350,6 +408,7 @@ export function parseArgs(raw: string, env: Record<string, string | undefined>):
   if (flags.instructionFile !== undefined) options.instructionFile = flags.instructionFile;
   if (flags.outputRoot !== undefined) options.outputRoot = flags.outputRoot;
   if (flags.dryRun) options.dryRun = true;
+  if (flags.yes) options.yes = true;
   if (flags.keepWorkspace) options.keepWorkspace = true;
   if (flags.help) options.help = true;
 

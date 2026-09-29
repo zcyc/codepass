@@ -15,12 +15,14 @@ import {
   isManagedInternalNetwork,
   parseArgs,
   parseDurationMs,
+  parseResumeArgs,
   parseVersion,
   resolveFromCwd,
   resolveExecutablePath,
   sanitizeName,
   sarifFindings,
   shouldCopyEntry,
+  shouldRequestFixConfirmation,
   shouldPruneEntry,
   stableStringify,
   tokenizeArgs,
@@ -50,11 +52,12 @@ check("parseArgs defaults", () => {
   assert.equal(options.maxTurns, 60);
   assert.equal(options.timeoutMs, 34_200_000);
   assert.equal(options.dryRun, false);
+  assert.equal(options.yes, false);
 });
 
 check("parseArgs flags, positionals and quoting", () => {
   const options = parseArgs(
-    '"/tmp/my project" deep --max-rounds 5 --max-budget 10 --max-turns 7 --dry-run --instruction "focus on auth"',
+    '"/tmp/my project" deep --max-rounds 5 --max-budget 10 --max-turns 7 --dry-run --yes --instruction "focus on auth"',
     {},
   );
   assert.deepEqual(options.errors, []);
@@ -64,7 +67,17 @@ check("parseArgs flags, positionals and quoting", () => {
   assert.equal(options.maxBudget, "10");
   assert.equal(options.maxTurns, 7);
   assert.equal(options.dryRun, true);
+  assert.equal(options.yes, true);
   assert.equal(options.instruction, "focus on auth");
+});
+
+check("fix approval only gates fresh and pending rounds", () => {
+  assert.equal(shouldRequestFixConfirmation("scan", false), true);
+  assert.equal(shouldRequestFixConfirmation("awaiting_confirmation", false), true);
+  assert.equal(shouldRequestFixConfirmation("prepare_fix", false), false);
+  assert.equal(shouldRequestFixConfirmation("fix", false), false);
+  assert.equal(shouldRequestFixConfirmation("fix_done", false), false);
+  assert.equal(shouldRequestFixConfirmation("awaiting_confirmation", true), false);
 });
 
 check("parseArgs reports invalid input", () => {
@@ -75,6 +88,18 @@ check("parseArgs reports invalid input", () => {
   );
   assert.ok(parseArgs("--max-rounds 0", {}).errors.some((item) => item.includes("positive integer")));
   assert.ok(parseArgs("", { PI_FIX_DRY_RUN: "maybe" }).errors.some((item) => item.includes("must be true or false")));
+});
+
+check("parseResumeArgs supports approval bypass and output roots", () => {
+  assert.deepEqual(parseResumeArgs('run-123 --yes --output-dir "/tmp/custom runs"'), {
+    runId: "run-123",
+    outputRoot: "/tmp/custom runs",
+    yes: true,
+    help: false,
+  });
+  assert.deepEqual(parseResumeArgs("--help"), { runId: "", outputRoot: undefined, yes: false, help: true });
+  assert.throws(() => parseResumeArgs(""), /run-id is required/);
+  assert.throws(() => parseResumeArgs("run-123 --unknown"), /unexpected argument/);
 });
 
 check("parseArgs reads environment defaults", () => {

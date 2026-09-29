@@ -11,8 +11,8 @@ One command, no scan artifacts to pass around:
 
 1. Copies the project into a sanitized temporary workspace.
 2. Runs a headless Strix scan in a per-round Docker network.
-3. Hands that round's `findings.sarif` and report to the current Pi agent for
-   triage and repair.
+3. Asks before handing that round's `findings.sarif` and report to the current
+   Pi agent for triage and repair.
 4. Rescans and repeats until the loop stops.
 
 The extension never commits, pushes, or deploys code.
@@ -21,6 +21,7 @@ The extension never commits, pushes, or deploys code.
 | --- | --- |
 | Scan failed or incomplete | `scan_failed` |
 | No findings remain | `pass` |
+| Waiting for approval to start a fix | `awaiting_confirmation` |
 | Same finding fingerprint after a fix | `stalled` |
 | Pi made no repository change | `stalled` |
 | Round limit reached | `round_limit` |
@@ -36,7 +37,7 @@ pi -e /path/to/codepass
 ```
 
 No scan result directory is required: each round's results are located
-automatically and handed to the agent as soon as Strix finishes.
+automatically. When findings remain, Pi asks before starting the fix pass.
 
 ## Requirements
 
@@ -63,6 +64,7 @@ automatically and handed to the agent as soon as Strix finishes.
 ```text
 /strix-fix-loop                                      # current dir, quick, 3 rounds
 /strix-fix-loop ~/src/my-app standard
+/strix-fix-loop ~/src/my-app standard --yes       # skip per-round fix prompts
 /strix-fix-loop ~/src/my-app deep --max-rounds 2 --max-budget 20
 /strix-fix-loop ~/src/my-app --instruction "Focus on authentication"
 PI_FIX_DRY_RUN=true /strix-fix-loop ~/src/my-app     # read-only triage
@@ -88,6 +90,7 @@ The `run-id` is the last component of the output directory and appears in the `/
 | `--max-rounds N` | `3` | Maximum scan/fix rounds |
 | `--output-dir PATH` | `~/strix_runs` | Run output root, outside the project |
 | `--dry-run` | `false` | Read-only fix pass, no file edits |
+| `--yes` | `false` | Skip confirmation before each Pi fix pass |
 | `--keep-workspace` | `false` | Keep the sanitized scan workspace |
 | `-n`, `--non-interactive` | — | Accepted for compatibility; scans are headless |
 | `-h`, `--help` | — | Show help in the transcript |
@@ -137,6 +140,10 @@ The `run-id` is the last component of the output directory and appears in the `/
 
 **Fix**
 
+- By default, Pi asks before each fix pass. Declining leaves the completed scan
+  resumable; use `/strix-resume <run-id> --yes` to continue without another prompt.
+- `--yes` skips these prompts for every round. Without UI, pass `--yes` to start
+  the run; otherwise it stops before launching a scan.
 - The fix prompt goes to the current Pi session (`pi.sendUserMessage`) and the
   loop waits for the turn to settle.
 - Changes are captured with a temporary Git index, so `changes.diff` also
@@ -147,7 +154,7 @@ The `run-id` is the last component of the output directory and appears in the `/
 **Resume**
 
 - `loop-state.json` stores the current phase, round, Pi session file, and Strix run name.
-- `/strix-resume <run-id>` resumes an interrupted Strix scan or continues an unfinished Pi fix in the restored Pi session, then proceeds to the next round.
+- `/strix-resume <run-id>` resumes an interrupted Strix scan or continues an unfinished Pi fix in the restored Pi session, then proceeds to the next round. Add `--yes` to skip pending and future fix confirmations.
 - A run can only resume in its original Pi session; continue the session that started it with `pi --continue`.
 
 ## Output
