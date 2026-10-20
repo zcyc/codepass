@@ -4,6 +4,20 @@ Pi 扩展 `/strix-fix-loop`：在当前 Pi 会话内执行本地授权的 Strix 
 
 [English](README.md)
 
+## 从 CI 结果直接修复
+
+在目标项目中打开 Pi，传入下载的结果目录，或其中的 SARIF / Markdown 文件路径：
+
+```text
+/strix-fix "/下载目录"
+```
+
+同目录需包含 `findings.sarif` 和 `penetration_test_report.md`；传入文件时使用指定文件，并自动查找同目录下另一份标准名称文件。旧的 `--sarif`、`--report` 参数已删除。
+
+命令校验文件后默认询问确认，然后在当前会话执行一次分诊和修复；不启动扫描，不需要 Strix、Docker、`run.json` 或循环检查点。支持 `--yes` 跳过确认、`--dry-run` 只读分析，以及 `--help` 查看用法。相对路径以当前 Pi 项目目录为基准。
+
+修复前会要求 agent 核实 CI 报告对应的代码版本，并将 CI 路径映射到当前项目。修复完成后不会自动重新扫描；请运行项目测试并通过 CI 验证。该命令不生成循环检查点，不能用 `/strix-resume` 恢复；中断后先检查会话和工作区。
+
 ## 它做什么
 
 一条命令，无需手动传入扫描产物：

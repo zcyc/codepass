@@ -5,6 +5,20 @@ that runs inside the current Pi session.
 
 [中文说明](README.zh-CN.md)
 
+## Fix downloaded CI results
+
+Open Pi in the target project and pass the downloaded result directory or a SARIF / Markdown file:
+
+```text
+/strix-fix "/downloads"
+```
+
+The directory must contain `findings.sarif` and `penetration_test_report.md`. When passing a file, that file is used and the other standard filename is resolved beside it. The former `--sarif` and `--report` flags have been removed.
+
+The command validates the files, asks for confirmation, then performs one triage/fix pass in the current session. It does not scan or require Strix, Docker, `run.json`, or loop checkpoints. Use `--yes` to skip confirmation, `--dry-run` for read-only analysis, or `--help` for usage. Relative paths resolve from the current Pi project.
+
+The agent is instructed to verify the CI code version and map CI paths to the current project. Run project tests and CI afterward; there is no automatic verification scan. This command creates no loop checkpoint and cannot be resumed with `/strix-resume`; inspect the session and working tree before retrying after an interruption.
+
 ## What it does
 
 One command, no scan artifacts to pass around:

@@ -199,6 +199,27 @@ export function tokenizeArgs(raw: string): string[] {
   return tokens;
 }
 
+export const FIX_USAGE = "Usage: /strix-fix PATH [--dry-run] [--yes]";
+
+export function parseFixArgs(raw: string): {
+  path: string; dryRun: boolean; yes: boolean; help: boolean;
+} {
+  const options = { path: "", dryRun: false, yes: false, help: false };
+  const tokens = tokenizeArgs(raw);
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token === "--help" || token === "-h") options.help = true;
+    else if (token === "--dry-run") options.dryRun = true;
+    else if (token === "--yes") options.yes = true;
+    else {
+      if (token.startsWith("-") || options.path) throw new Error(`unexpected argument: ${token}`);
+      options.path = token;
+    }
+  }
+  if (!options.help && !options.path) throw new Error("a result file or directory path is required");
+  return options;
+}
+
 export function parseResumeArgs(raw: string): ResumeOptions {
   const tokens = tokenizeArgs(raw);
   let runId = "";

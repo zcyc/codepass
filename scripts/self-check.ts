@@ -14,6 +14,7 @@ import {
   isBinaryHeader,
   isManagedInternalNetwork,
   parseArgs,
+  parseFixArgs,
   parseDurationMs,
   parseResumeArgs,
   parseVersion,
@@ -301,6 +302,17 @@ check("instructions and fix prompt", () => {
     allowBreaking: true,
   });
   assert.ok(fixPrompt.includes("可以直接修改必要文件"));
+});
+
+
+check("parseFixArgs accepts CI artifact paths and rejects invalid arguments", () => {
+  assert.deepEqual(parseFixArgs('"ci results/findings.sarif" --yes --dry-run'), {
+    path: "ci results/findings.sarif", yes: true, dryRun: true, help: false,
+  });
+  assert.equal(parseFixArgs("--help").help, true);
+  for (const raw of ["", "a b", "--sarif a", "--report b", "--unknown", '"broken']) {
+    assert.throws(() => parseFixArgs(raw));
+  }
 });
 
 console.log(`strix-fix-loop self-check: ok (${checks} checks)`);

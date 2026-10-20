@@ -19,6 +19,6 @@
     "@earendil-works/pi-tui": "*"
   },
   "scripts": {
-    "check": "node scripts/self-check.ts"
+    "check": "node scripts/self-check.ts && node scripts/fix-command-check.ts"
   }
 }
