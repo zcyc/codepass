@@ -211,9 +211,10 @@ func resolveExecutable(value, fallback string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return canonicalPath(path)
+		return filepath.Abs(path)
 	}
-	path, err := canonicalPath(value)
+	// Preserve symlink names: multicall executables dispatch using argv[0].
+	path, err := filepath.Abs(value)
 	if err != nil {
 		return "", err
 	}

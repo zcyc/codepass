@@ -334,7 +334,7 @@ func prepareScan(options *scanOptions) (*scanRuntime, error) {
 		return nil, errors.New("docker is required")
 	}
 	if _, err := commandOutput(dockerBin, "info"); err != nil {
-		return nil, errors.New("Docker daemon is unavailable to the current user")
+		return nil, fmt.Errorf("Docker daemon check failed; verify Docker is running and this process can access the configured Docker endpoint: %w", err)
 	}
 	versionOutput, err := commandOutput(strixBin, "-v")
 	if err != nil {
