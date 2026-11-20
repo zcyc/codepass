@@ -400,6 +400,10 @@ func parseSARIF(path string) (sarifDocument, error) {
 	if err != nil {
 		return sarifDocument{}, err
 	}
+	return decodeSARIF(data)
+}
+
+func decodeSARIF(data []byte) (sarifDocument, error) {
 	var document sarifDocument
 	if err := json.Unmarshal(data, &document); err != nil {
 		return sarifDocument{}, fmt.Errorf("invalid SARIF JSON: %w", err)
@@ -415,6 +419,9 @@ type sarifDocument struct {
 }
 
 type sarifRun struct {
+	VersionControlProvenance []struct {
+		RevisionID string `json:"revisionId"`
+	} `json:"versionControlProvenance"`
 	Results []sarifResult `json:"results"`
 }
 

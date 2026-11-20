@@ -38,8 +38,12 @@ go build -o codepass .
 `scan` is interactive by default. `fix` is interactive by default. `run` is
 automatic by default. Use `--interactive` or `--auto` to select explicitly.
 
-The scan result argument for `fix` must be a result directory containing
-`findings.sarif`, or that exact file. CodePass never guesses the latest scan.
+Pass a result directory containing `findings.sarif` and
+`penetration_test_report.md`, a `.sarif` file with the standard Markdown file
+beside it, or a `.md` file with the standard SARIF file beside it.
+Writable fixes ask for confirmation, including with `--auto`.
+A successful Pi exit leaves project verification pending. Review the diff and
+run your project checks before treating the findings as fixed.
 
 The default `run` loop has three rounds. It stops when a scan fails or is
 incomplete, no findings remain, Pi makes no change, the same finding

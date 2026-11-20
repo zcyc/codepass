@@ -33,7 +33,9 @@ go build -o codepass .
 
 `scan` 默认进入交互模式，`fix` 默认进入交互模式，`run` 默认自动运行。可以显式使用 `--interactive` 或 `--auto`。
 
-`fix` 的扫描结果参数必须是包含 `findings.sarif` 的结果目录，或该文件本身。程序不会猜测“最新扫描”。
+`fix` 接受结果目录、`.sarif` 文件或 `.md` 报告。目录须包含 `findings.sarif` 和 `penetration_test_report.md`。传入单个文件时，另一份文件须以标准名称放在同目录。
+可写修复需要确认，使用 `--auto` 时同样如此。
+Pi 正常退出后，项目验证仍为待验证。请审查变更并运行项目检查。
 
 `run` 默认最多执行 3 轮。当扫描失败或不完整、没有发现问题、Pi 没有改动、同一 finding 指纹再次出现或达到轮数上限时停止。
 
@@ -42,6 +44,27 @@ go build -o codepass .
 ```bash
 PI_FIX_DRY_RUN=true ./codepass fix --auto /path/to/project /path/to/scan-result
 ```
+
+## 使用本机安装的报告修复版
+
+`PATH` 上的 `codepass` 提供单次报告修复。结果目录需要包含
+`findings.sarif` 和 `penetration_test_report.md`。
+
+```bash
+# 只读分析
+PI_FIX_DRY_RUN=true codepass fix --auto /path/to/project /path/to/results
+
+# 确认可写修复
+codepass fix /path/to/project /path/to/results
+
+# 修复后检查 Go 项目
+cd /path/to/project
+git diff
+go vet ./...
+go test ./...
+```
+
+本机安装的报告修复版没有扫描、自动循环或轮数设置。
 
 ## 环境变量
 
