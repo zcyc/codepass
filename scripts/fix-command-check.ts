@@ -69,9 +69,9 @@ try {
   assert.deepEqual(tools, ["read", "bash", "edit"]);
   assert.equal(confirmations, 1);
   await run('"penetration_test_report.md" --yes');
-  assert.ok(prompt.includes(sarif));
+  assert.ok(prompt.includes("findings.sarif"));
   await run('"." --yes');
-  assert.ok(prompt.includes(report));
+  assert.ok(prompt.includes("penetration_test_report.md"));
   await fs.writeFile(join(root, "unsupported.txt"), "test");
   prompt = "";
   await run('unsupported.txt --yes');
