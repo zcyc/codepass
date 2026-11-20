@@ -13,15 +13,16 @@ import (
 )
 
 type fixOptions struct {
-	project       string
-	scanArg       string
-	mode          uiMode
-	outputDir     string
-	piBin         string
-	dryRun        bool
-	allowBreaking bool
-	timeout       time.Duration
-	output        io.Writer
+	explicitImport bool
+	project        string
+	scanArg        string
+	mode           uiMode
+	outputDir      string
+	piBin          string
+	dryRun         bool
+	allowBreaking  bool
+	timeout        time.Duration
+	output         io.Writer
 }
 
 func runFixCLI(ctx context.Context, args []string) error {
@@ -57,12 +58,16 @@ func runFixCLI(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	options.explicitImport = true
 	return runFix(ctx, options)
 }
 
 func printFixUsage(w io.Writer) {
 	fmt.Fprintln(w, `Usage:
-  codepass fix [--interactive|--auto] <local-project-dir> <strix-scan-result>
+  codepass fix [--interactive|--auto] <local-project-dir> <result-directory|.sarif|.md>
+
+The result must include both a SARIF file and a Markdown report.
+Writable runs require confirmation.
 
 Environment:
   PI_BIN, PI_OUTPUT_DIR, PI_FIX_DRY_RUN, PI_FIX_ALLOW_BREAKING, PI_TIMEOUT`)
@@ -92,12 +97,27 @@ func newFixOptions(project, scanArg string, mode uiMode) (fixOptions, error) {
 }
 
 func runFix(ctx context.Context, options fixOptions) error {
-	project, scanDir, sarif, err := resolveFixInputs(options.project, options.scanArg)
+	project, scanDir, sarif, report, err := resolveFixInputs(options.project, options.scanArg)
 	if err != nil {
 		return err
 	}
 	if !fileRegularNonEmpty(sarif) {
 		return fmt.Errorf("findings.sarif must be a non-empty regular file: %s", sarif)
+	}
+	if options.explicitImport {
+		if _, err := parseSARIF(sarif); err != nil {
+			return fmt.Errorf("validate %s: %w", sarif, err)
+		}
+		if !fileRegularNonEmpty(report) {
+			return fmt.Errorf("Markdown report must be a non-empty regular file: %s", report)
+		}
+		contents, err := os.ReadFile(report)
+		if err != nil {
+			return fmt.Errorf("read Markdown report: %w", err)
+		}
+		if strings.TrimSpace(string(contents)) == "" {
+			return fmt.Errorf("Markdown report is blank: %s", report)
+		}
 	}
 	if status := firstLineValue(filepath.Join(scanDir, "scan-status.txt"), "status="); status != "" && status != "success" {
 		fmt.Fprintf(os.Stderr, "WARNING: selected scan status is %q; findings may be incomplete.\n", status)
@@ -120,12 +140,19 @@ func runFix(ctx context.Context, options fixOptions) error {
 	if err := requireOutside(scanDir, outputRoot, "PI_OUTPUT_DIR"); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(outputRoot, 0o700); err != nil {
-		return fmt.Errorf("create Pi output root: %w", err)
-	}
 	piBin, err := resolveExecutable(options.piBin, "pi")
 	if err != nil {
 		return fmt.Errorf("pi executable not found; set PI_BIN or install pi: %w", err)
+	}
+	if options.explicitImport && !options.dryRun && options.allowBreaking {
+		fmt.Fprintf(os.Stderr, "Pi may modify %q using SARIF %q and report %q. Proceed? [y/N] ", project, sarif, report)
+		var reply string
+		if _, err := fmt.Fscanln(os.Stdin, &reply); err != nil || !strings.EqualFold(reply, "y") {
+			return errors.New("repair cancelled before starting Pi")
+		}
+	}
+	if err := os.MkdirAll(outputRoot, 0o700); err != nil {
+		return fmt.Errorf("create Pi output root: %w", err)
 	}
 	projectName := sanitizeName(filepath.Base(project), 64)
 	fixDir := filepath.Join(outputRoot, projectName+"-"+time.Now().Format("20060102-150405")+"-"+strconv.Itoa(os.Getpid()))
@@ -165,13 +192,13 @@ func runFix(ctx context.Context, options fixOptions) error {
 		"dry_run": strconv.FormatBool(options.dryRun), "mode": string(options.mode),
 		"pi_exit_code": "pending", "project": project, "project_name": projectName,
 		"read_only": strconv.FormatBool(options.dryRun || !options.allowBreaking),
-		"report":    filepath.Join(scanDir, "penetration_test_report.md"), "sarif": sarif,
+		"report":    report, "sarif": sarif,
 		"scan_dir": scanDir, "started_at": time.Now().Format(time.RFC3339),
 		"timeout": durationText(options.timeout),
 	}); err != nil {
 		return err
 	}
-	prompt := buildFixPrompt(project, sarif, scanDir, options, filepath.Join(scanDir, "penetration_test_report.md"))
+	prompt := buildFixPrompt(project, sarif, report, options)
 	if err := os.WriteFile(promptFile, []byte(prompt), 0o600); err != nil {
 		return err
 	}
@@ -183,7 +210,6 @@ func runFix(ctx context.Context, options fixOptions) error {
 		args = append(args, "--tools", "read,grep,find,ls")
 	}
 	args = append(args, "@"+sarif)
-	report := filepath.Join(scanDir, "penetration_test_report.md")
 	if fileRegularNonEmpty(report) {
 		args = append(args, "@"+report)
 	}
@@ -195,6 +221,9 @@ func runFix(ctx context.Context, options fixOptions) error {
 	fmt.Fprintln(options.output, "Project:", project)
 	fmt.Fprintln(options.output, "Scan:", scanDir)
 	fmt.Fprintln(options.output, "SARIF:", sarif)
+	if options.explicitImport {
+		fmt.Fprintln(options.output, "Report:", report)
+	}
 	fmt.Fprintln(options.output, "Output:", fixDir)
 	fmt.Fprintln(options.output, "Mode:", options.mode)
 	fmt.Fprintln(options.output, "Dry run:", options.dryRun)
@@ -257,7 +286,7 @@ func runFix(ctx context.Context, options fixOptions) error {
 		"dry_run": strconv.FormatBool(options.dryRun), "finished_at": time.Now().Format(time.RFC3339),
 		"mode": string(options.mode), "pi_exit_code": strconv.Itoa(code), "project": project,
 		"project_name": projectName, "read_only": strconv.FormatBool(options.dryRun || !options.allowBreaking),
-		"report": filepath.Join(scanDir, "penetration_test_report.md"), "sarif": sarif,
+		"report": report, "sarif": sarif,
 		"scan_dir": scanDir, "started_at": time.Now().Format(time.RFC3339), "timeout": durationText(options.timeout),
 	}); err != nil {
 		return err
@@ -273,40 +302,46 @@ func runFix(ctx context.Context, options fixOptions) error {
 	return nil
 }
 
-func resolveFixInputs(projectArg, scanArg string) (project, scanDir, sarif string, err error) {
+func resolveFixInputs(projectArg, scanArg string) (project, scanDir, sarif, report string, err error) {
 	project, err = canonicalPath(projectArg)
 	if err != nil {
-		return "", "", "", fmt.Errorf("cannot resolve project directory: %w", err)
+		return "", "", "", "", fmt.Errorf("cannot resolve project directory: %w", err)
 	}
 	info, err := os.Stat(project)
 	if err != nil || !info.IsDir() {
-		return "", "", "", fmt.Errorf("project directory does not exist: %s", projectArg)
+		return "", "", "", "", fmt.Errorf("project directory does not exist: %s", projectArg)
 	}
 	if project == string(filepath.Separator) || strings.Contains(project, "\n") {
-		return "", "", "", errors.New("refusing to operate on filesystem root or a path containing a newline")
+		return "", "", "", "", errors.New("refusing to operate on filesystem root or a path containing a newline")
 	}
 	scanInfo, err := os.Stat(scanArg)
 	if err != nil {
-		return "", "", "", fmt.Errorf("Strix scan result path does not exist: %s", scanArg)
+		return "", "", "", "", fmt.Errorf("Strix scan result path does not exist: %s", scanArg)
 	}
 	if scanInfo.IsDir() {
 		scanDir, err = canonicalPath(scanArg)
 		if err != nil {
-			return "", "", "", err
+			return "", "", "", "", err
 		}
-		sarif = filepath.Join(scanDir, "findings.sarif")
-	} else {
-		linkInfo, linkErr := os.Lstat(scanArg)
-		if linkErr != nil || linkInfo.Mode()&os.ModeSymlink != 0 || filepath.Base(scanArg) != "findings.sarif" {
-			return "", "", "", fmt.Errorf("scan result file must be findings.sarif: %s", scanArg)
-		}
-		sarif, err = canonicalPath(scanArg)
-		if err != nil {
-			return "", "", "", err
-		}
-		scanDir = filepath.Dir(sarif)
+		return project, scanDir, filepath.Join(scanDir, "findings.sarif"),
+			filepath.Join(scanDir, "penetration_test_report.md"), nil
 	}
-	return project, scanDir, sarif, nil
+	if !fileRegularNonEmpty(scanArg) {
+		return "", "", "", "", fmt.Errorf("scan result must be a non-empty regular file: %s", scanArg)
+	}
+	selected, err := canonicalPath(scanArg)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	scanDir = filepath.Dir(selected)
+	switch filepath.Ext(selected) {
+	case ".sarif":
+		return project, scanDir, selected, filepath.Join(scanDir, "penetration_test_report.md"), nil
+	case ".md":
+		return project, scanDir, filepath.Join(scanDir, "findings.sarif"), selected, nil
+	default:
+		return "", "", "", "", fmt.Errorf("pass a result directory, .sarif file, or .md report: %s", scanArg)
+	}
 }
 
 func fileRegularNonEmpty(path string) bool {
@@ -328,7 +363,7 @@ func durationText(value time.Duration) string {
 	return value.String()
 }
 
-func buildFixPrompt(project, sarif, scanDir string, options fixOptions, report string) string {
+func buildFixPrompt(project, sarif, report string, options fixOptions) string {
 	readOnly := options.dryRun || !options.allowBreaking
 	permission := "当前不是只读模式：可以直接修改必要文件。"
 	if readOnly {
